@@ -9,13 +9,13 @@ from datetime import datetime, timedelta
 # PAGE CONFIGURATION & QUANT THEME
 # ==========================================
 st.set_page_config(
-    page_title="Alpha-VCP Sector Quant",
+    page_title="Alpha-VCP Dynamic Quant",
     page_icon="⚡",
     layout="wide"
 )
 
-st.title("⚡ Alpha-VCP Sector-Rotation Quant Engine")
-st.markdown("### **Top-Down Matrix: RRG Sector Tailwinds + Advanced Trailing Exits**")
+st.title("⚡ Alpha-VCP Matrix with Financial Metrics")
+st.markdown("### **Top-Down Matrix: RRG Sector Tailwinds + Historical Quarterly Sales Track**")
 st.write("---")
 
 # ==========================================
@@ -87,20 +87,52 @@ def fetch_bulk_historical_data(ticker_list):
     start_dt = (datetime.today() - timedelta(days=730)).strftime('%Y-%m-%d')
     return yf.download(ticker_list, start=start_dt, end=end_dt, interval="1d", group_by='ticker', progress=False)
 
+# Fundamental Extraction for Display Only
+def calculate_historical_sales_growth(ticker_symbol):
+    """
+    Fetches raw financials and calculates the percentage growth 
+    between the two most recent quarters.
+    """
+    try:
+        t_obj = yf.Ticker(ticker_symbol)
+        quarterly_funda = t_obj.quarterly_financials
+        
+        revenue_labels = ['Total Revenue', 'Gross Sales', 'Operating Revenue']
+        target_label = None
+        for label in revenue_labels:
+            if label in quarterly_funda.index:
+                target_label = label
+                break
+                
+        if target_label is not None:
+            rev_series = quarterly_funda.loc[target_label].dropna()
+            if len(rev_series) >= 2:
+                # Index 0 = Latest Quarter, Index 1 = Previous Quarter
+                latest_q_sales = float(rev_series.iloc[0])
+                prev_q_sales = float(rev_series.iloc[1])
+                
+                if prev_q_sales > 0:
+                    growth = ((latest_q_sales - prev_q_sales) / prev_q_sales) * 100
+                    return f"{round(growth, 2)}%"
+    except Exception:
+        pass
+    return "Data N/A"
+
 tab1, tab2 = st.tabs(["🔍 Sector-Filter Scanner", "📊 Quant Alpha Backtester"])
 
 # ==========================================
-# TAB 1: LIVE SCANNER WITH SECTOR MOMENTUM
+# TAB 1: LIVE SCANNER WITH INFO-ONLY SALES COLUMN
 # ==========================================
 with tab1:
     st.subheader("📡 Live Institutional Engine (Hot Sector Filtering)")
     if st.button("🔥 RUN LIVE SCREENING WITH SECTOR FILTER"):
-        with st.spinner("Analyzing market data for simultaneous sector collection..."):
+        with st.spinner("Scanning market and fetching fundamental metrics..."):
             
             chunk_size = 80
             raw_detections = []
             sector_counts = {}
             
+            # Phase 1: Technical & Structural Check
             for i in range(0, len(TICKERS), chunk_size):
                 chunk = TICKERS[i:i+chunk_size]
                 market_data = fetch_bulk_historical_data(chunk)
@@ -148,6 +180,7 @@ with tab1:
                                 sector_counts[current_sector] = sector_counts.get(current_sector, 0) + 1
                                 
                                 raw_detections.append({
+                                    "Ticker_Raw": ticker,
                                     "Ticker": ticker.replace('.NS', ''),
                                     "Company Name": NAME_MAP.get(ticker, "Unknown Asset"),
                                     "Sector": current_sector,
@@ -159,18 +192,44 @@ with tab1:
                     except Exception: 
                         continue
             
+            # Phase 2: Live Sector Allocation & Dynamic Column Ingestion
             final_filtered_gems = []
-            for item in raw_detections:
+            
+            status_text = st.empty()
+            progress_bar = st.progress(0)
+            
+            for index, item in enumerate(raw_detections):
                 sec = item["Sector"]
+                status_text.text(f"Processing data column for: {item['Ticker']}...")
+                
+                # Check Sector Cohesion Rule
                 if sector_counts.get(sec, 0) >= min_sector_cohesion:
+                    # Fetch and fill column WITHOUT dropping the asset if sales are low
+                    sales_pct = calculate_historical_sales_growth(item["Ticker_Raw"])
+                    item["Sales Growth (Prev 2 Qtrs)"] = sales_pct
+                    
                     item["Sector Strength Indicators"] = f"🔥 HOT SECTOR ({sector_counts[sec]} Assets Active)"
                     final_filtered_gems.append(item)
                     
+                progress_bar.progress((index + 1) / len(raw_detections))
+            
+            status_text.empty()
+            progress_bar.empty()
+                    
             if final_filtered_gems:
-                st.success(f"💎 Found {len(final_filtered_gems)} Alpha Assets protected by Hot Sector Rotation Tailwinds!")
-                st.dataframe(pd.DataFrame(final_filtered_gems), use_container_width=True)
+                st.success(f"💎 Found {len(final_filtered_gems)} Technical Alpha Assets!")
+                # Convert to dataframe and clean tracking columns
+                final_df = pd.DataFrame(final_filtered_gems).drop(columns=['Ticker_Raw'])
+                
+                # Reordering columns to bring fundamental analytics to sight
+                cols = list(final_df.columns)
+                if "Sales Growth (Prev 2 Qtrs)" in cols:
+                    cols.insert(4, cols.pop(cols.index("Sales Growth (Prev 2 Qtrs)")))
+                    final_df = final_df[cols]
+                
+                st.dataframe(final_df, use_container_width=True)
             else:
-                st.warning("No assets matched the combined structure and sector filters. Try lowering the sidebar settings.")
+                st.warning("No assets matched the combined technical structure and sector filters.")
 
 # ==========================================
 # TAB 2: PORTFOLIO BACKTESTER ENGINE WITH ADVANCED EXITS
@@ -225,11 +284,7 @@ with tab2:
                             
                             days_in_trade = (df.index[t] - entry_date).days
                             
-                            # NEW CORE QUANT EXIT LOGIC:
-                            # Rule 1: Breach of 20 EMA with high volume (Volume > 50 SMA Vol)
                             exit_rule_1 = (current_close < ema20) and (current_volume > avg_volume)
-                            
-                            # Rule 2: Candle close below 30 EMA (Regardless of volume)
                             exit_rule_2 = (current_close < ema30)
                             
                             if exit_rule_1 or exit_rule_2 or (t == len(df) - 2):
