@@ -9,13 +9,13 @@ from datetime import datetime, timedelta
 # PAGE CONFIGURATION & QUANT THEME
 # ==========================================
 st.set_page_config(
-    page_title="Alpha-VCP Dynamic Quant",
+    page_title="Alpha-VCP Dual-Funda Quant",
     page_icon="⚡",
     layout="wide"
 )
 
-st.title("⚡ Alpha-VCP Matrix with Financial Metrics")
-st.markdown("### **Top-Down Matrix: RRG Sector Tailwinds + Historical Quarterly Sales Track**")
+st.title("⚡ Alpha-VCP Dual-Quarter Momentum Engine")
+st.markdown("### **Top-Down Matrix: Sector Tailwinds + Multi-Quarter Sales Velocity**")
 st.write("---")
 
 # ==========================================
@@ -87,12 +87,15 @@ def fetch_bulk_historical_data(ticker_list):
     start_dt = (datetime.today() - timedelta(days=730)).strftime('%Y-%m-%d')
     return yf.download(ticker_list, start=start_dt, end=end_dt, interval="1d", group_by='ticker', progress=False)
 
-# Fundamental Extraction for Display Only
-def calculate_historical_sales_growth(ticker_symbol):
+# Dual-Quarter Analytical Engine
+def calculate_dual_quarter_growth(ticker_symbol):
     """
-    Fetches raw financials and calculates the percentage growth 
-    between the two most recent quarters.
+    Fetches financial statement matrix and computes:
+    1. Current Quarter Growth (Latest vs Previous)
+    2. Previous Quarter Growth (Previous vs 2-Quarters-Ago)
     """
+    curr_growth = "Data N/A"
+    prev_growth = "Data N/A"
     try:
         t_obj = yf.Ticker(ticker_symbol)
         quarterly_funda = t_obj.quarterly_financials
@@ -106,33 +109,49 @@ def calculate_historical_sales_growth(ticker_symbol):
                 
         if target_label is not None:
             rev_series = quarterly_funda.loc[target_label].dropna()
-            if len(rev_series) >= 2:
-                # Index 0 = Latest Quarter, Index 1 = Previous Quarter
-                latest_q_sales = float(rev_series.iloc[0])
-                prev_q_sales = float(rev_series.iloc[1])
+            
+            # We need at least 3 historical quarters to compute two distinct growth points
+            if len(rev_series) >= 3:
+                # yfinance Matrix Structure: Index 0 = Latest, Index 1 = Previous, Index 2 = 2-Quarters-Ago
+                q0_latest = float(rev_series.iloc[0])
+                q1_prev = float(rev_series.iloc[1])
+                q2_older = float(rev_series.iloc[2])
                 
-                if prev_q_sales > 0:
-                    growth = ((latest_q_sales - prev_q_sales) / prev_q_sales) * 100
-                    return f"{round(growth, 2)}%"
+                # 1. Current Quarter vs One Quarter Before
+                if q1_prev > 0:
+                    c_calc = ((q0_latest - q1_prev) / q1_prev) * 100
+                    curr_growth = f"{round(c_calc, 2)}%"
+                    
+                # 2. One Quarter Before vs Two Quarters Before
+                if q2_older > 0:
+                    p_calc = ((q1_prev - q2_older) / q2_older) * 100
+                    prev_growth = f"{round(p_calc, 2)}%"
+            elif len(rev_series) == 2:
+                # Fallback if only 2 data nodes exist
+                q0_latest = float(rev_series.iloc[0])
+                q1_prev = float(rev_series.iloc[1])
+                if q1_prev > 0:
+                    c_calc = ((q0_latest - q1_prev) / q1_prev) * 100
+                    curr_growth = f"{round(c_calc, 2)}%"
     except Exception:
         pass
-    return "Data N/A"
+    return curr_growth, prev_growth
 
-tab1, tab2 = st.tabs(["🔍 Sector-Filter Scanner", "📊 Quant Alpha Backtester"])
+tab1, tab2 = st.tabs(["🔍 Dual-Funda Scanner Engine", "📊 Quant Alpha Backtester"])
 
 # ==========================================
-# TAB 1: LIVE SCANNER WITH INFO-ONLY SALES COLUMN
+# TAB 1: LIVE SCANNER WITH DUAL SALES COLUMNS
 # ==========================================
 with tab1:
-    st.subheader("📡 Live Institutional Engine (Hot Sector Filtering)")
-    if st.button("🔥 RUN LIVE SCREENING WITH SECTOR FILTER"):
-        with st.spinner("Scanning market and fetching fundamental metrics..."):
+    st.subheader("📡 Live Structural & Velocity Screening Matrix")
+    if st.button("🔥 RUN LIVE SCREENING MATRIX"):
+        with st.spinner("Processing technical configurations & crunching multi-quarter records..."):
             
             chunk_size = 80
             raw_detections = []
             sector_counts = {}
             
-            # Phase 1: Technical & Structural Check
+            # Phase 1: Technical Filtration Pass
             for i in range(0, len(TICKERS), chunk_size):
                 chunk = TICKERS[i:i+chunk_size]
                 market_data = fetch_bulk_historical_data(chunk)
@@ -158,7 +177,7 @@ with tab1:
                         if current_close < df.iloc[idx]['SMA_50']: 
                             continue
                         
-                        # Find Catalyst Day
+                        # Identify Catalyst Box
                         found_impulse = False
                         impulse_idx = -1
                         for lb in range(1, lookback_window + 1):
@@ -192,7 +211,7 @@ with tab1:
                     except Exception: 
                         continue
             
-            # Phase 2: Live Sector Allocation & Dynamic Column Ingestion
+            # Phase 2: Live Advanced Revenue Compiling 
             final_filtered_gems = []
             
             status_text = st.empty()
@@ -200,15 +219,17 @@ with tab1:
             
             for index, item in enumerate(raw_detections):
                 sec = item["Sector"]
-                status_text.text(f"Processing data column for: {item['Ticker']}...")
+                status_text.text(f"Extracting double revenue matrices for: {item['Ticker']}...")
                 
                 # Check Sector Cohesion Rule
                 if sector_counts.get(sec, 0) >= min_sector_cohesion:
-                    # Fetch and fill column WITHOUT dropping the asset if sales are low
-                    sales_pct = calculate_historical_sales_growth(item["Ticker_Raw"])
-                    item["Sales Growth (Prev 2 Qtrs)"] = sales_pct
+                    # Fetching both growth metrics simultaneously
+                    curr_q_growth, prev_q_growth = calculate_dual_quarter_growth(item["Ticker_Raw"])
                     
-                    item["Sector Strength Indicators"] = f"🔥 HOT SECTOR ({sector_counts[sec]} Assets Active)"
+                    item["Current Qtr Sales Growth"] = curr_q_growth
+                    item["Prev Qtr Sales Growth"] = prev_q_growth
+                    
+                    item["Sector Strength Indicators"] = f"🔥 HOT SECTOR ({sector_counts[sec]} Active)"
                     final_filtered_gems.append(item)
                     
                 progress_bar.progress((index + 1) / len(raw_detections))
@@ -217,14 +238,15 @@ with tab1:
             progress_bar.empty()
                     
             if final_filtered_gems:
-                st.success(f"💎 Found {len(final_filtered_gems)} Technical Alpha Assets!")
-                # Convert to dataframe and clean tracking columns
+                st.success(f"💎 Multi-Quarter Technofunda Tracking Enabled! Found {len(final_filtered_gems)} Assets.")
                 final_df = pd.DataFrame(final_filtered_gems).drop(columns=['Ticker_Raw'])
                 
-                # Reordering columns to bring fundamental analytics to sight
+                # Clean Layout Ordering 
                 cols = list(final_df.columns)
-                if "Sales Growth (Prev 2 Qtrs)" in cols:
-                    cols.insert(4, cols.pop(cols.index("Sales Growth (Prev 2 Qtrs)")))
+                # Pulling both metrics near the basic ticker info columns
+                if "Current Qtr Sales Growth" in cols and "Prev Qtr Sales Growth" in cols:
+                    cols.insert(4, cols.pop(cols.index("Current Qtr Sales Growth")))
+                    cols.insert(5, cols.pop(cols.index("Prev Qtr Sales Growth")))
                     final_df = final_df[cols]
                 
                 st.dataframe(final_df, use_container_width=True)
