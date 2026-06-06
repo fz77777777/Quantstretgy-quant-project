@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 st.title("⚡ Alpha-VCP Sector-Rotation Quant Engine")
-st.markdown("### **Top-Down Matrix: RRG Sector Tailwinds + Adaptive Base Breakouts**")
+st.markdown("### **Top-Down Matrix: RRG Sector Tailwinds + Advanced Trailing Exits**")
 st.write("---")
 
 # ==========================================
@@ -35,9 +35,8 @@ with st.sidebar:
     st.subheader("🔥 3. RRG / Sector Rotation Rules")
     min_sector_cohesion = st.slider("Min Co-Sector Stocks Triggered", 1, 5, 2, 1)
     
-    st.subheader("🛡️ 4. Risk & Execution Management")
-    exit_logic = st.selectbox("Exit Strategy", ["Close Below 10 EMA", "Breach of Box Floor"])
-    target_profit = st.slider("Fixed Take-Profit (%) [0 = Trailing Only]", 0, 100, 35, 5)
+    st.subheader("🛡️ 4. Risk & Advanced Profit Booking")
+    st.info("💡 Exit Rules Locked:\n1. 20 EMA Breach + High Volume\n2. Candle Close below 30 EMA")
 
 # ==========================================
 # DATA POOL MATRIX LOADER (2500+ NSE Universe)
@@ -102,14 +101,12 @@ with tab1:
             raw_detections = []
             sector_counts = {}
             
-            # Phase 1: Scan and look for volume expansion across sectors
             for i in range(0, len(TICKERS), chunk_size):
                 chunk = TICKERS[i:i+chunk_size]
                 market_data = fetch_bulk_historical_data(chunk)
                 
                 for ticker in chunk:
                     try:
-                        # FIX: Checked and safely handled MultiIndex Columns level termination
                         if ticker not in market_data.columns.levels[0]: 
                             continue
                             
@@ -129,7 +126,7 @@ with tab1:
                         if current_close < df.iloc[idx]['SMA_50']: 
                             continue
                         
-                        # Find the Catalyst Event (EP)
+                        # Find Catalyst Day
                         found_impulse = False
                         impulse_idx = -1
                         for lb in range(1, lookback_window + 1):
@@ -162,7 +159,6 @@ with tab1:
                     except Exception: 
                         continue
             
-            # Phase 2: Filter raw alerts based on Hot/Improving Sectors Only
             final_filtered_gems = []
             for item in raw_detections:
                 sec = item["Sector"]
@@ -177,14 +173,14 @@ with tab1:
                 st.warning("No assets matched the combined structure and sector filters. Try lowering the sidebar settings.")
 
 # ==========================================
-# TAB 2: PORTFOLIO BACKTESTER ENGINE
+# TAB 2: PORTFOLIO BACKTESTER ENGINE WITH ADVANCED EXITS
 # ==========================================
 with tab2:
     st.subheader("📊 Dynamic Matrix Institutional Backtester")
     if st.button("🚀 EXECUTE SECTOR-VALIDATED BACKTEST"):
-        with st.spinner("Running historical simulations using customized parameters..."):
+        with st.spinner("Running historical simulations using customized trailing exit boundaries..."):
             
-            test_subset = TICKERS[:150] # Liquid sample pool
+            test_subset = TICKERS[:150] 
             bulk_history = fetch_bulk_historical_data(test_subset)
             
             all_trades = []
@@ -198,7 +194,8 @@ with tab2:
                     if len(df) < 150: 
                         continue
                     
-                    df['EMA_10'] = df['Close'].ewm(span=10, adjust=False).mean()
+                    df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
+                    df['EMA_30'] = df['Close'].ewm(span=30, adjust=False).mean()
                     df['SMA_50'] = df['Close'].rolling(window=50).mean()
                     df['Vol_SMA50'] = df['Volume'].rolling(window=50).mean()
                     df['Pct_Change'] = df['Close'].pct_change() * 100
@@ -206,40 +203,51 @@ with tab2:
                     in_position = False
                     entry_price = 0
                     entry_date = None
-                    stop_loss_level = 0
                     
                     for t in range(50, len(df) - 1):
                         current_row = df.iloc[t]
                         
                         if not in_position:
-                            # Dynamic Breakout Check
                             if current_row['Pct_Change'] >= min_ep_gain and current_row['Volume'] >= (vol_shock_factor * current_row['Vol_SMA50']):
                                 lookback_slice = df.iloc[max(0, t-lookback_window):t+1]
                                 box_w = ((lookback_slice['High'].max() - lookback_slice['Low'].min()) / lookback_slice['Low'].min()) * 100
                                 
-                                # Process execution only if boundaries are met
                                 if box_w <= max_allowed_box_width and current_row['Close'] > current_row['SMA_50']:
                                     in_position = True
-                                    entry_price = float(df.iloc[t+1]['Open']) # Next-day Open execution
+                                    entry_price = float(df.iloc[t+1]['Open']) 
                                     entry_date = df.index[t+1]
-                                    stop_loss_level = float(lookback_slice['Low'].min()) if exit_logic == "Breach of Box Floor" else float(current_row['EMA_10'])
                         else:
                             current_close = float(df.iloc[t]['Close'])
+                            current_volume = float(df.iloc[t]['Volume'])
+                            avg_volume = float(df.iloc[t]['Vol_SMA50'])
+                            ema20 = float(df.iloc[t]['EMA_20'])
+                            ema30 = float(df.iloc[t]['EMA_30'])
+                            
                             days_in_trade = (df.index[t] - entry_date).days
                             
-                            hit_sl = current_close < stop_loss_level if exit_logic == "Breach of Box Floor" else current_close < df.iloc[t]['EMA_10']
-                            hit_tp = (current_close >= entry_price * (1 + target_profit/100)) if target_profit > 0 else False
+                            # NEW CORE QUANT EXIT LOGIC:
+                            # Rule 1: Breach of 20 EMA with high volume (Volume > 50 SMA Vol)
+                            exit_rule_1 = (current_close < ema20) and (current_volume > avg_volume)
                             
-                            if hit_sl or hit_tp or (t == len(df) - 2):
-                                exit_price = float(df.iloc[t]['Close'])
+                            # Rule 2: Candle close below 30 EMA (Regardless of volume)
+                            exit_rule_2 = (current_close < ema30)
+                            
+                            if exit_rule_1 or exit_rule_2 or (t == len(df) - 2):
+                                exit_price = current_close
                                 pnl_pct = ((exit_price - entry_price) / entry_price) * 100
+                                
+                                exit_reason = "⚠️ 20 EMA High Vol Breach" if exit_rule_1 else "🛑 30 EMA Candle Close"
+                                if t == len(df) - 2: exit_reason = "⏳ Horizon End"
                                 
                                 all_trades.append({
                                     "Asset": ticker.replace('.NS', ''),
                                     "Sector": SECTOR_MAP.get(ticker, "Broad Market"),
                                     "Entry Date": entry_date.strftime('%Y-%m-%d'),
+                                    "Exit Date": df.index[t].strftime('%Y-%m-%d'),
+                                    "Holding Period": f"{days_in_trade} Days",
                                     "Trade Return (%)": round(pnl_pct, 2),
-                                    "Status": "🎯 Profit" if pnl_pct > 0 else "🛑 Stop-Loss"
+                                    "Exit Reason": exit_reason,
+                                    "Status": "🎯 Profit" if pnl_pct > 0 else "🛑 Loss"
                                 })
                                 in_position = False
                 except Exception: 
@@ -248,7 +256,7 @@ with tab2:
             if all_trades:
                 trades_df = pd.DataFrame(all_trades)
                 
-                # Metrics UI Outputs
+                # Metrics Display
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("🎯 Total Executed Trades", f"{len(trades_df)}")
                 win_rate = (len(trades_df[trades_df['Trade Return (%)'] > 0]) / len(trades_df)) * 100
@@ -259,7 +267,7 @@ with tab2:
                 sharpe = (returns_array.mean() / returns_array.std() * np.sqrt(252)) if returns_array.std() != 0 else 0
                 m4.metric("🏆 Strategy Sharpe Ratio", f"{round(sharpe, 2)}")
                 
-                # Graph Compilation
+                # Graph Performance
                 st.subheader("📈 Cumulative Strategy Returns Profile")
                 trades_df['Cum_Returns'] = (1 + trades_df['Trade Return (%)']/100).cumprod() - 1
                 fig = go.Figure()
@@ -269,4 +277,4 @@ with tab2:
                 
                 st.dataframe(trades_df, use_container_width=True)
             else:
-                st.error("No trades executed. Loosen constraints further via control panels.")
+                st.error("No trades executed. Adjust sidebar metrics to load simulation bounds.")
